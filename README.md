@@ -26,10 +26,10 @@ Put your OPENAI API key in a `.env` file, like:
 OPENAI_API_KEY="xxxxxxxx"
 ```
 
-Then run the script:
+Then run the script.
 
 ```shell
-python3 ./src/yang2openapi.py  -t --verbose --infile ./data/example.yang --outfile swagger.json
+python3 ./src/yang2openapi.py  -u --verbose --infile ./data/example.yang --outfile swagger.json
 ```
 
 To try the output you could run the `swagger-ui` in a docker container. In the example below,
@@ -41,7 +41,14 @@ $ docker run -d -p 7080:8080 -e SWAGGER_JSON=/foo/swagger.json -v /tmp/shared_do
 
 # Then point your browser to:
 http://localhost:7080/
+```
 
+If you run the Swagger container like the above then you can run `yang2openapi` like this and
+the output ends up where the Swagger UI expects to find it, which makes for easy reload.
+Note also how we specified a specific server where we run a RESTCONF server.
+
+```shell
+python3 src/yang2openapi.py  --verbose -u -s 'http://192.168.1.231:9080/restconf/data' --infile ./data/example.yang --outfile /tmp/shared_docker_dir/swagger.json
 ```
 
 ## Demo
