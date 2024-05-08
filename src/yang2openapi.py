@@ -39,9 +39,12 @@ def parse_args() -> str:
 
     parser.add_argument('-i', '--infile', type=str, help='Input Yang file')
     parser.add_argument('-o', '--outfile', type=str, help='Output OpenAPI file')
+    parser.add_argument('-m', '--model', type=str, default='gpt-4', help='Set OpenAPI to use (default: gpt-4)')
     parser.add_argument('-t', '--time', action='store_true' , help='Output some runtime info')
-    parser.add_argument('--validate', action='store_true' , help='Validate OpenAPI infile')
+    parser.add_argument('-u', '--user-interactive', action='store_true' , help='You will be prompted for improvment instructions.')
+    parser.add_argument('--validate', action='store_true' , help='Validate OpenAPI <infile>')
     parser.add_argument('--temperature', type=float, default=0.2, help='Set the temperature for creativity (default: 0.2)')
+    parser.add_argument('-s', '--server-url', type=str, default='http://localhost:8080/restconf/data', help='Set the server URL in the OpenAPI')
     parser.add_argument('-v', '--verbose', action='store_true' , help='Output some debug info')
 
 
@@ -138,22 +141,25 @@ def extract_json_object(text, decoder=json.JSONDecoder()) -> Iterable[Dict[str, 
             print_verbose(f"<error> extract_json_objects: {e}")
             pos = match + 1
 
+# - The Yang elements: 'container', 'list', 'leaf-list' and 'leaf' can be operated on with GET, POST, PUT, DELETE, and PATCH.
 
 system_template = """
-You are an expert in Yang as specified in RFC 7950 and OpenAPI as specified in version 3.1.
-You excel in transforming Yang models to the corresponding OpenAPI JSON.
+You are an expert in Yang as specified in RFC 7950, RESTCONF as specified in RFC 8040 and OpenAPI as specified in version 3.1.
+You excel in transforming Yang models to the corresponding OpenAPI JSON that conforms to the RESTCONF RFC.
 You must follow the following rules:
 
 1. The answer should consist of JSON only!
 2. The OpenAPI JSON schema should be in version 3.1.
 3. Be elaborate in your answer and provide as much detail as possible including all the necessary objects.
-4. You should produce both Path, Path Item, and Operation Objects.
-5. For Yang list and leaf-list elements, you should produce a Parameter Path Object for corresponding keys.
-6. The Yang elements: 'container', 'list', 'leaf-list' and 'leaf' can be operated on with GET, POST, PUT, DELETE, and PATCH.
-7. The Yang elements: 'rpc' and 'action' can be operated on with POST.
-8. Ignore all other Yang elements.
-9. Add a Security Scheme Object with 'http' and the scheme 'basic'.
-10. All GET operations have an optional query Parameter Object with the name 'depth' of type 'uint16'.
+4. Every element in the YANG model should be transformed to the corresponding OpenAPI JSON objects.
+5. The Yang elements: 'rpc' and 'action' can only be operated on with POST.
+6. You should produce both Path, Path Item, and Operation Objects where an initial Path Item is prefixed with the Yang module name followed by a colon; example: 'foo:bar'.
+7. For Yang list and leaf-list elements, you should produce a Parameter Path Object for corresponding keys, unless the operation is a POST.
+8. For each path operation, you should produce a Request Body Object with an example, unless the operation is a GET.
+9. The content media type should be 'application/yang-data+json'.
+10. Add a Security Scheme Object with 'http' and the scheme 'basic'.
+11. All GET operations have an optional query Parameter Object with the name 'depth' of type 'uint16'.
+12. Add a Server Object with the URL: '{server_url}'.
 """
 
 system_error_template = """
@@ -179,9 +185,31 @@ Here follows the incorrect OpenAPI JSON file, to be corrected accordingly:
 {openapi_json}
 """
 
+system_improve_template = """
+Some improvement of the OpenAPI JSON file is needed.
+Reply with the complete and improved OpenAPI JSON file.
+Only JSON is accepted.
+"""
+
+improve_template = """
+You need to improve the OpenAPI JSON file as described below:
+
+{user_reply}
+
+Here follows the OpenAPI JSON file, to be improved accordingly:
+{openapi_json}
+"""
+
 @log_execution_time
 def call_llm(chat_model, prompt):
-    return chat_model.invoke(prompt)
+    # Start the spinner
+    spinner = Spinner()
+    spinner.start()
+    # Call the model
+    result = chat_model.invoke(prompt)
+    # Stop the spinner
+    spinner.stop()
+    return result
 
 
 @log_execution_time
@@ -209,23 +237,23 @@ def main(args: argparse.Namespace):
             print(error)
         exit(0)
 
-    if not args.verbose and not args.time:
-        # Start the spinner
-        spinner = Spinner()
-        spinner.start()
-
     # Read in the Yang file
     with open(args.infile, 'r') as f:
         content = f.read()
 
-    chat_model = ChatOpenAI(openai_api_key=api_key, model_name="gpt-4")
+    chat_model = ChatOpenAI(openai_api_key=api_key, model_name=args.model)
+    # Modify the temperature to become more deterministic (default: 0.7)
+    # chat_model.temperature = 0
 
     init_prompt = ChatPromptTemplate.from_messages([
         ("system", system_template),
         ("human" , human_template)
     ])
 
-    prompt = init_prompt.format_messages(yang_model=content)
+    prompt = init_prompt.format_messages(
+        server_url=args.server_url,
+        yang_model=content
+    )
     answer = call_llm(chat_model, prompt)
 
     # Max 5 iterations!
@@ -262,23 +290,31 @@ def main(args: argparse.Namespace):
 
         # If errors were found, prompt for a new corrected answer,
         # else break the loop to terminate.
-        if not errors_found:
-            logger.info(f"<INFO> No errors found in OpenAPI file")
-            break
-        else:
+        if errors_found:
             error_prompt = ChatPromptTemplate.from_messages([
                 ("system", system_error_template),
                 ("human" , error_template)
             ])
             prompt = error_prompt.format_messages(errors=errors, openapi_json=json_output)
-            print_verbose("<{i}> Got errors in OpenAPI file, prompting for new answer")
+            print_verbose(f"<{i}> Got errors in OpenAPI file, prompting for new answer")
             answer = call_llm(chat_model, prompt)
             continue
 
-    
-    if not args.verbose and not args.time:
-        # Stop the spinner
-        spinner.stop()
+        if args.user_interactive:
+            # Ask the user if the answer is correct
+            print("Give instructions for improving the OpenAPI JSON ('quit' to exit):")
+            user_reply = input(f"{i}>: ")
+            if user_reply.lower() == "quit":
+                break
+            else:
+                improve_prompt = ChatPromptTemplate.from_messages([
+                    ("system", system_improve_template),
+                    ("human" , improve_template)
+                ])
+                prompt = improve_prompt.format_messages(user_reply=user_reply, openapi_json=json_output)
+                answer = call_llm(chat_model, prompt)
+                continue
+
 
 
 if __name__ == "__main__":
