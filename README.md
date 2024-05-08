@@ -20,6 +20,12 @@ make
 . ./pyvenv/bin/activate
 ```
 
+Put your OPENAI API key in a `.env` file, like:
+
+```shell
+OPENAI_API_KEY="xxxxxxxx"
+```
+
 Then run the script:
 
 ```shell
