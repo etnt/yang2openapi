@@ -1,47 +1,73 @@
 module example {
 
-    namespace "http://example.com/ns/example";
-    prefix "ex";
+  namespace "http://example.com/ns/example";
+  prefix "ex";
 
-    import tailf-common {
-        prefix tailf;
-    }
+  import tailf-common {
+    prefix tailf;
+  }
 
-    organization "Example, Inc.";
-    contact "support at example.com";
-    description "Example Data Model Module";
-    revision "2016-08-15" {
-        description "Initial version.";
-        reference "example.com document 1-4673";
-    }
+  organization
+    "Example, Inc.";
+  contact
+    "support at example.com";
+  description
+    "Example Data Model Module";
+  revision "2016-08-15" {
+    description
+      "Initial version.";
+    reference
+      "example.com document 1-4673";
+  }
 
-    container jukebox {
-        presence
-            "An empty container indicates that the jukebox
-             service is available";
+  container jukebox {
+    presence
+      "An empty container indicates that the jukebox
+       service is available";
 
+    description
+      "Represents a jukebox resource, with a library, playlists,
+       and a play operation.";
+
+    container library {
+      description
+        "Represents the jukebox library resource.";
+
+      list artist {
+        key name;
         description
-            "Represents a jukebox resource, with a library, playlists,
-             and a play operation.";
+          "Represents one artist resource within the
+           jukebox library resource.";
 
-        container library {
-            description "Represents the jukebox library resource.";
-
-            list artist {
-                key name;
-                description
-                    "Represents one artist resource within the
-                     jukebox library resource.";
-              
-                leaf name {
-                    type string;
-                    description "The name of the artist.";
-                }
-                leaf age {
-                    type uint16;
-                    description "Age of the Artist.";
-                }
-            }
+        leaf name {
+          type string;
+          description
+            "The name of the artist.";
         }
+        leaf age {
+          type uint16;
+          description
+            "Age of the Artist.";
+        }
+      }
     }
+  }
+  container top {
+    tailf:action ping {
+      tailf:actionpoint "pingpong";
+      input {
+        leaf ip {
+          type string;
+        }
+      }
+      output {
+        leaf statistics {
+          type string;
+        }
+        leaf-list response {
+          type string;
+        }
+      }
+    }
+  }
 }
