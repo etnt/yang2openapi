@@ -72,25 +72,26 @@ an OpenAPI JSON code from a simple Yang model. This is done interactively with a
 ## Help
 
 ```shell
-$ python3 src/yang2openapi.py  --help
-usage: yang2openapi.py [-h] [-i INFILE] [-o OUTFILE] [-m MODEL] [-t] [-u] [--validate] [--temperature TEMPERATURE] [-s SERVER_URL] [-v]
+$ python3 src/yang2openapi.py --help
+usage: yang2openapi.py [-h] [-i INFILE] [-o OUTFILE] [-m MODEL] [-t] [-u] [--validate] [--improve] [--temperature TEMPERATURE] [-s SERVER_URL] [-v]
 
 Ask an AI model for answer to you question
 
 options:
   -h, --help            show this help message and exit
   -i INFILE, --infile INFILE
-                        Input Yang file
+                        Input file
   -o OUTFILE, --outfile OUTFILE
-                        Output OpenAPI file
+                        Output file
   -m MODEL, --model MODEL
                         Set OpenAPI to use (default: gpt-4)
   -t, --time            Output some runtime info
   -u, --user-interactive
                         You will be prompted for improvment instructions.
   --validate            Validate OpenAPI <infile>
+  --improve             Improve OpenAPI <infile>
   --temperature TEMPERATURE
-                        Set the temperature for creativity (default: 0.2)
+                        Set the temperature for creativity (default: 0.7)
   -s SERVER_URL, --server-url SERVER_URL
                         Set the server URL in the OpenAPI
   -v, --verbose         Output some debug info
