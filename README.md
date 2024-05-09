@@ -1,15 +1,27 @@
 # yang2openapi - Yang to OpenAPI generator using AI
-> Just some AI experimenting
+> Just some AI experiments with Yang and OpenAPI.
 
 Experiment trying to make use of GPT to create an OpenAPI 3.1
-specification from a Yang file.
+specification from a YANG (RFC 7950) file, focusing on RESTCONF
+(RFC 8040) compliance.
     
-When an answer, containing JSON, is received it is validated
+Basically, we are running our program in a loop, where we begin by
+asking GPT to produce a corresponding Open API JSON code.
+
+When an answer is received, containing JSON, it is validated
 to make sure it conform to the OpenAPI 3.1 specification,
 and if not, the errors will be returned to the GPT asking it
-to correct the errors and return an updated spec. 
+to correct the errors and return an updated JSON code. 
 
 This is repeated until no more errors are found.
+
+Then (if the `-u` switch was used) we will ask the user for any
+improvements to be made to the OpenAPI JSON. This request for
+improvements will be sent to the GPT and we will make a new turn
+in our loop.
+
+Thus we will be able to, iteratively, create the OpenAPI JSON code
+by means of both spec validation and user requests for improvements.
 
 ## Run
 
@@ -45,7 +57,7 @@ http://localhost:7080/
 
 If you run the Swagger container like the above then you can run `yang2openapi` like this and
 the output ends up where the Swagger UI expects to find it, which makes for easy reload.
-Note also how we specified a specific server where we run a RESTCONF server.
+Note also how we specify a server where we run a RESTCONF server.
 
 ```shell
 python3 src/yang2openapi.py  --verbose -u -s 'http://192.168.1.231:9080/restconf/data' --infile ./data/example.yang --outfile /tmp/shared_docker_dir/swagger.json

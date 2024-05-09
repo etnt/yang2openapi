@@ -13,6 +13,7 @@ from openapi_spec_validator import validate
 from openapi_spec_validator.readers import read_from_filename
 from openapi_spec_validator import OpenAPIV31SpecValidator
 import logging
+from logging import FileHandler
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -26,59 +27,86 @@ from typing import (
 )
 
 load_dotenv()
-
 api_key = os.getenv("OPENAI_API_KEY")
 
 
-logging.basicConfig(filename="./logs/yang2openapi.log", level=logging.INFO, format='%(name)s : %(levelname)-8s : %(message)s')
+# Create a logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
+# Create a handler that truncates the log file every time the program is run
+handler = FileHandler("./logs/yang2openapi.log", mode='w')
+handler.setFormatter(logging.Formatter('%(name)s : %(levelname)-8s : %(message)s'))
+
+# Add the handler to the logger
+logger.addHandler(handler)
+
+
+# Create a class to hold the configuration and other stateful data
+class Config:
+    def __init__(self):
+        self.start_by_improving = False
+        self.validate_only = False
+        self.model = 'gpt-4'
+        self.verbose = False
+        self.default_temperature = 0.7
+        self.server_url = 'http://localhost:8080/restconf/data'
+        self.infile = None
+        self.outfile = None
+        self.infile_content = None
+        self.user_interactive = False
 
 def parse_args() -> str:
     parser = argparse.ArgumentParser(description='Ask an AI model for answer to you question')
 
-    parser.add_argument('-i', '--infile', type=str, help='Input Yang file')
-    parser.add_argument('-o', '--outfile', type=str, help='Output OpenAPI file')
+    parser.add_argument('-i', '--infile', type=str, help='Input file')
+    parser.add_argument('-o', '--outfile', type=str, help='Output file')
     parser.add_argument('-m', '--model', type=str, default='gpt-4', help='Set OpenAPI to use (default: gpt-4)')
     parser.add_argument('-t', '--time', action='store_true' , help='Output some runtime info')
     parser.add_argument('-u', '--user-interactive', action='store_true' , help='You will be prompted for improvment instructions.')
     parser.add_argument('--validate', action='store_true' , help='Validate OpenAPI <infile>')
+    parser.add_argument('--improve', action='store_true' , help='Improve OpenAPI <infile>')
     parser.add_argument('--temperature', type=float, default=0.7, help='Set the temperature for creativity (default: 0.7)')
     parser.add_argument('-s', '--server-url', type=str, default='http://localhost:8080/restconf/data', help='Set the server URL in the OpenAPI')
     parser.add_argument('-v', '--verbose', action='store_true' , help='Output some debug info')
 
-
     args = parser.parse_args()
 
-    if not args.infile:
-        print(f"Error: No input file specified. Use --help to see valid input.")
-        exit(1)
-
-    if args.verbose:
-        os.environ['QSEARCH_VERBOSE'] = 'True'
-    
     if args.time:
-        os.environ['QSEARCH_RUNTIME'] = 'True'
+        os.environ['YANG2OPENAPI_RUNTIME'] = 'True'
 
-    return args
+    config = Config()
+    config.validate_only = args.validate
+    config.model = args.model
+    config.verbose = args.verbose
+    config.default_temperature = args.temperature
+    config.server_url = args.server_url
+    config.infile = args.infile
+    config.outfile = args.outfile
+    config.user_interactive = args.user_interactive
+    config.start_by_improving = args.improve
+
+    return config
 
 
 def log_execution_time(func):
-    """Decorator to log the execution time of a function."""
-
+    """Decorator to log the execution time of a function.
+    """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start_time = time.time()
         result = func(*args, **kwargs)
         end_time = time.time()
         execution_time = end_time - start_time
-        if os.getenv('QSEARCH_RUNTIME'):
+        if os.getenv('YANG2OPENAPI_RUNTIME'):
             print(f"{func.__name__} executed in {execution_time:.4f} seconds")
         return result
 
     return wrapper
 
 class Spinner:
+    """Display some information while waiting for the AI model to respond.
+    """
     def __init__(self, message='Loading...'):
         #self.spinner = itertools.cycle(['-', '/', '|', '\\'])
         self.spinner = itertools.count(0, 1)
@@ -225,71 +253,108 @@ def call_llm(chat_model, prompt):
 
 
 @log_execution_time
-def validate_json(outfile):
-    spec_dict, _base_uri = read_from_filename(outfile)
+def validate_json(file):
+    spec_dict, _base_uri = read_from_filename(file)
     return OpenAPIV31SpecValidator(spec_dict).iter_errors()
 
 
 @log_execution_time
-def mk_json_output(json_object):
+def mk_json_output(json_object, indent=4):
     try:
-        json_output = json.dumps(json_object, indent=4)
+        json_output = json.dumps(json_object, indent=indent)
     except TypeError as e:
-        print(f"Error serializing JSON: {e}")
+        print(f"<ERROR> serializing JSON: {e}")
         json_output = None
     return json_output
 
 
-def main(args: argparse.Namespace):
+def read_infile(cfg: Config) -> Config:
+    with open(cfg.infile, 'r') as f:
+        cfg.infile_content = f.read()
+    return cfg
 
-    # Validate only?
-    if args.validate:
-        errors_iterator = validate_json(args.infile)
-        for error in errors_iterator:
-            print(error)
+
+def validate_json_file_and_exit(cfg: Config) -> None:
+    errors_iterator = validate_json(cfg.infile)
+    found_errors = False
+    for error in errors_iterator:
+        found_errors = True
+        print(error)
+
+    if found_errors:
+        exit(1)
+    else:
+        print("No errors found in OpenAPI file")
         exit(0)
 
+
+def main(cfg: Config) -> None:
+
+    # Validate only?
+    if cfg.validate_only:
+        validate_json_file_and_exit(cfg)
+
     # Read in the Yang file
-    with open(args.infile, 'r') as f:
-        content = f.read()
+    cfg = read_infile(cfg)
 
-    chat_model = ChatOpenAI(openai_api_key=api_key, model_name=args.model)
-    chat_model.temperature = args.temperature
-
-    init_prompt = ChatPromptTemplate.from_messages([
-        ("system", system_template),
-        ("human" , human_template)
-    ])
-
-    # Create the initial prompt.
-    prompt = init_prompt.format_messages(
-        general_system_rules=general_system_rules,
-        server_url=args.server_url,
-        yang_model=content
+    # Create the chat model
+    chat_model = ChatOpenAI(
+        openai_api_key=api_key,
+        model_name=cfg.model
     )
+    chat_model.temperature = cfg.default_temperature
+
+    if cfg.start_by_improving:
+        # Create the initial prompt containing the OpenAPI JSON input.
+        # FIXME: This is not implemented yet.
+        pass
+    else:
+        # Create the initial prompt containing the YANG input.
+        init_prompt = ChatPromptTemplate.from_messages([
+            ("system", system_template),
+            ("human" , human_template)
+        ])
+        prompt = init_prompt.format_messages(
+            general_system_rules=general_system_rules,
+            server_url=cfg.server_url,
+            yang_model=cfg.infile_content
+        )
+
+    logger.info(f"INIT PROMPT: {prompt}")
+
+    # Call the model with the initial prompt
     answer = call_llm(chat_model, prompt)
 
+    # If the LLM do not return a JSON object we need to keep
+    # track of the previous good JSON object to be able to
+    # potentially have it returned to be improved upon user request.
     json_output = None
     prev_json_output = None
-    # Max 5 iterations!
-    for i in range(5):
+
+    # Counter to be displayed in the prompt, indicating the number of iterations.
+    i = 0
+
+    # Loop until the user is satisfied with the answer.
+    while True:
+        i += 1
         logger.info(f"ANSWER: {answer.content}")
     
-        prev_json_output = json_output
-        json_object = extract_json_object(answer.content)
+        json_iter_object = extract_json_object(answer.content)
+        json_object = next(json_iter_object, None)
         # Get the next (and in this case, the only) item from the generator.
         try:
-            json_output = mk_json_output(next(json_object))
+            json_output = mk_json_output(json_object)
+            prev_json_output = json_output
         except StopIteration:
             json_output = None
             print(f"No JSON object found in answer, got: {answer.content}")
 
+        # If we got a JSON object, write it to the output file and validate it.
         errors_found = False
-        if args.outfile and json_output:
-            outfile = args.outfile
+        if cfg.outfile and json_output:
+            outfile = cfg.outfile
             with open(outfile, 'w') as f:
                 f.write(json_output)
-
             # Validate the OpenAPI spec we got from the AI model.
             errors_iterator = validate_json(outfile)
             errors = []
@@ -298,8 +363,7 @@ def main(args: argparse.Namespace):
                 errors.append(error)
                 errors_found = True
 
-        # If errors were found, prompt for a new corrected answer,
-        # else break the loop to terminate.
+        # If errors were found, prompt for a new corrected answer from the LLM.
         if errors_found and json_output:
             error_prompt = ChatPromptTemplate.from_messages([
                 ("system", system_error_template),
@@ -310,12 +374,13 @@ def main(args: argparse.Namespace):
                 errors=errors, 
                 openapi_json=json_output
             )
+            logger.info(f"ERROR PROMPT: {prompt}")
             print(f"<{i}> Got {len(errors)} errors in the OpenAPI JSON; prompting for new answer")
             answer = call_llm(chat_model, prompt)
             continue
 
-        if args.user_interactive:
-            # Ask the user if the answer is correct
+        # Ask the user if the OpenAPI JSON should be further improved.
+        if cfg.user_interactive:
             print("Give instructions for improving the OpenAPI JSON ('quit' to exit):")
             user_reply = input(f"{i}>: ")
             if user_reply.lower() == "quit":
@@ -331,6 +396,7 @@ def main(args: argparse.Namespace):
                     user_reply=user_reply,
                     openapi_json=current_json_output
                 )
+                logger.info(f"IMPROVE PROMPT: {prompt}")
                 answer = call_llm(chat_model, prompt)
                 continue
 
@@ -338,7 +404,7 @@ def main(args: argparse.Namespace):
 
 if __name__ == "__main__":
     # Parse the command line arguments
-    args = parse_args()
+    cfg = parse_args()
 
     # Call the main function with the parsed arguments
-    main(args)
+    main(cfg)
