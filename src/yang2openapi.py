@@ -61,7 +61,7 @@ def parse_args() -> str:
 
     parser.add_argument('-i', '--infile', type=str, help='Input file')
     parser.add_argument('-o', '--outfile', type=str, help='Output file')
-    parser.add_argument('-m', '--model', type=str, default='gpt-4', help='Set OpenAPI to use (default: gpt-4)')
+    parser.add_argument('-m', '--model', type=str, default='gpt-4o', help='Set OpenAPI to use (default: gpt-4)')
     parser.add_argument('-t', '--time', action='store_true' , help='Output some runtime info')
     parser.add_argument('-u', '--user-interactive', action='store_true' , help='You will be prompted for improvment instructions.')
     parser.add_argument('--validate', action='store_true' , help='Validate OpenAPI <infile>')
