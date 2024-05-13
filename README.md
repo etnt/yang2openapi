@@ -97,3 +97,87 @@ options:
   -v, --verbose         Output some debug info
 ```
 
+## Fine Tuning
+
+Fine-tuning a model like GPT-3.5 Turbo to generate OpenAPI JSON from YANG input involves creating a dataset that pairs YANG module inputs with their corresponding OpenAPI JSON outputs. The dataset must be designed to teach the model the pattern of translating YANG schema definitions into OpenAPI specifications.
+
+Here’s an example of how you might construct a single training example for a simple YANG container containing a leaf of type string. This training example will include both the input (YANG schema) and the expected output (OpenAPI JSON).
+
+### YANG Input (Prompt)
+
+This YANG snippet describes a basic container with one leaf of type string:
+
+```yang
+module example-module {
+  namespace "http://example.com/ns/example-module";
+  prefix em;
+
+  container device {
+    leaf device-name {
+      type string;
+      description "The name of the device";
+    }
+  }
+}
+```
+
+### OpenAPI JSON Output (Completion)
+
+This OpenAPI JSON output maps the YANG container and leaf to an OpenAPI schema:
+```json
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Example Module API",
+    "version": "1.0.0",
+    "description": "API generated from YANG module example-module"
+  },
+  "servers": [
+    {
+      "url": "http://api.example.com/"
+    }
+  ],
+  "paths": {
+    "/device": {
+      "get": {
+        "summary": "Get device information",
+        "operationId": "getDevice",
+        "responses": {
+          "200": {
+            "description": "Successful retrieval of device information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "device-name": {
+                      "type": "string",
+                      "description": "The name of the device"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Structuring Your Training Data
+
+For fine-tuning, you would create a JSON file containing multiple such examples formatted as follows:
+
+```json
+[
+  {
+    "prompt": "module example-module {\n  namespace \"http://example.com/ns/example-module\";\n  prefix em;\n\n  container device {\n    leaf device-name {\n      type string;\n      description \"The name of the device\";\n    }\n  }\n}",
+    "completion": "{\n  \"openapi\": \"3.0.0\",\n  \"info\": {\n    \"title\": \"Example Module API\",\n    \"version\": \"1.0.0\",\n    \"description\": \"API generated from YANG module example-module\"\n  },\n  \"servers\": [\n    {\n      \"url\": \"http://api.example.com/\"\n    }\n  ],\n  \"paths\": {\n    \"/device\": {\n      \"get\": {\n        \"summary\": \"Get device information\",\n        \"operationId\": \"getDevice\",\n        \"responses\": {\n          \"200\": {\n            \"description\": \"Successful retrieval of device information\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"type\": \"object\",\n                  \"properties\": {\n                    \"device-name\": {\n                      \"type\": \"string\",\n                      \"description\": \"The name of the device\"\n                    }\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}"
+  },
+  // More examples here
+]
+```
+
+Each entry in your dataset consists of a `prompt` field containing the YANG schema and a `completion` field containing the expected OpenAPI JSON. The key here is to provide enough varied examples to cover different aspects of YANG to OpenAPI transformation, including different types of nodes (like containers, lists, leaf-lists, choices, etc.), data types, and complexities. This breadth ensures that the model learns a comprehensive mapping between YANG constructs and OpenAPI specifications.

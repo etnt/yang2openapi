@@ -220,10 +220,14 @@ The following errors was found in the OpenAPI file:
 
 Here follows the incorrect OpenAPI JSON file, to be corrected accordingly:
 {openapi_json}
+
+Here follows the original Yang model for reference:
+
+{yang_model}
 """
 
 system_improve_template = """
-Some improvement of the OpenAPI JSON file is needed.
+{user_reply}
 Reply with the complete and improved OpenAPI JSON file.
 Only JSON is accepted.
 Remember to follow the following rules:
@@ -232,12 +236,13 @@ Remember to follow the following rules:
 """
 
 improve_template = """
-You need to improve the OpenAPI JSON file as described below:
-
-{user_reply}
-
 Here follows the OpenAPI JSON file, to be improved accordingly:
+
 {openapi_json}
+
+Here follows the original Yang model for reference:
+
+{yang_model}
 """
 
 @log_execution_time
@@ -246,16 +251,17 @@ def call_llm(chat_model, prompt):
     spinner = Spinner()
     spinner.start()
     # Call the model
-    result = chat_model.invoke(prompt)
+    try:
+        result = chat_model.invoke(prompt)
+    except Exception as e:
+        # May end up here when the quota is exceeded.
+        spinner.stop()
+        print(f"<ERROR> calling model: {e}")
+        exit(1)
     # Stop the spinner
     spinner.stop()
     return result
 
-
-@log_execution_time
-def validate_json(file):
-    spec_dict, _base_uri = read_from_filename(file)
-    return OpenAPIV31SpecValidator(spec_dict).iter_errors()
 
 
 @log_execution_time
@@ -274,18 +280,57 @@ def read_infile(cfg: Config) -> Config:
     return cfg
 
 
-def validate_json_file_and_exit(cfg: Config) -> None:
-    errors_iterator = validate_json(cfg.infile)
-    found_errors = False
-    for error in errors_iterator:
-        found_errors = True
-        print(error)
+@log_execution_time
+def validate_json(file):
+    spec_dict, _base_uri = read_from_filename(file)
+    return OpenAPIV31SpecValidator(spec_dict).iter_errors()
 
-    if found_errors:
+
+def validate_json_file_and_exit(cfg: Config) -> None:
+    try:
+        errors_iterator = validate_json(cfg.infile)
+        found_errors = False
+        for error in errors_iterator:
+            found_errors = True
+            print(error)
+
+        if found_errors:
+            exit(1)
+        else:
+            print("No errors found in OpenAPI file")
+            exit(0)
+    except Exception as e:
+        print(f"Error validating OpenAPI file: {e}")
         exit(1)
-    else:
-        print("No errors found in OpenAPI file")
-        exit(0)
+
+
+
+# The path is located as: ...{'paths': { <path>: <obj>, <path>: <obj>, ... }}...
+def print_path_elements(json_object):
+    if isinstance(json_object, dict):
+        for key, value in json_object.items():
+            if key == 'paths':
+                for path, path_value in value.items():
+                    print(f"Path: {path}")
+                    if isinstance(path_value, dict):
+                        print("Children keys: ", list(path_value.keys()))
+            else:
+                print_path_elements(value)
+    elif isinstance(json_object, list):
+        for item in json_object:
+            print_path_elements(item)
+
+def xprint_path_elements(json_object):
+    if isinstance(json_object, dict):
+        for key, value in json_object.items():
+            if key == 'paths':
+                for path in value.keys():
+                    print(path)
+            else:
+                print_path_elements(value)
+    elif isinstance(json_object, list):
+        for item in json_object:
+            print_path_elements(item)
 
 
 def main(cfg: Config) -> None:
@@ -307,7 +352,9 @@ def main(cfg: Config) -> None:
     if cfg.start_by_improving:
         # Create the initial prompt containing the OpenAPI JSON input.
         # FIXME: This is not implemented yet.
-        pass
+        spec_dict, _base_uri = read_from_filename(cfg.infile)
+        print_path_elements(spec_dict)
+        exit(0)
     else:
         # Create the initial prompt containing the YANG input.
         init_prompt = ChatPromptTemplate.from_messages([
@@ -329,57 +376,71 @@ def main(cfg: Config) -> None:
     # track of the previous good JSON object to be able to
     # potentially have it returned to be improved upon user request.
     json_output = None
-    prev_json_output = None
+    prev_json_object = None
 
     # Counter to be displayed in the prompt, indicating the number of iterations.
     i = 0
 
+    # -------------------------------------------------------------
     # Loop until the user is satisfied with the answer.
+    # -------------------------------------------------------------
     while True:
         i += 1
-        logger.info(f"ANSWER: {answer.content}")
+        logger.info(f"ANSWER:\n{answer.content}")
     
         json_iter_object = extract_json_object(answer.content)
-        json_object = next(json_iter_object, None)
         # Get the next (and in this case, the only) item from the generator.
-        try:
-            json_output = mk_json_output(json_object)
-            prev_json_output = json_output
-        except StopIteration:
-            json_output = None
-            print(f"No JSON object found in answer, got: {answer.content}")
+        json_object = next(json_iter_object, None)
 
+        if json_object:
+            prev_json_object = json_object
+
+        # -------------------------------------------------------------
         # If we got a JSON object, write it to the output file and validate it.
+        # -------------------------------------------------------------
         errors_found = False
-        if cfg.outfile and json_output:
+        if cfg.outfile and json_object:
+            json_output = mk_json_output(json_object)
             outfile = cfg.outfile
             with open(outfile, 'w') as f:
                 f.write(json_output)
             # Validate the OpenAPI spec we got from the AI model.
-            errors_iterator = validate_json(outfile)
             errors = []
-            for error in errors_iterator:
-                logger.info(f"ERROR: {error}")
-                errors.append(error)
+            try:
+                # Note: The OpenAPI spec validator may crash if e.g schema components are missing.
+                # Hence we need to catch that and produce an error message to be returned to the LLM.
+                errors_iterator = validate_json(outfile)
+                for error in errors_iterator:
+                    logger.info(f"ERROR: {error}")
+                    errors.append(error)
+                    errors_found = True
+            except Exception as e:
                 errors_found = True
+                errors.append(str(e))
 
+        # -------------------------------------------------------------
         # If errors were found, prompt for a new corrected answer from the LLM.
-        if errors_found and json_output:
+        # -------------------------------------------------------------
+        if errors_found and json_object:
             error_prompt = ChatPromptTemplate.from_messages([
                 ("system", system_error_template),
                 ("human" , error_template)
             ])
+            json_output = mk_json_output(json_object, indent=None)
             prompt = error_prompt.format_messages(
                 general_system_rules=general_system_rules,
                 errors=errors, 
-                openapi_json=json_output
+                openapi_json=json_output,
+                yang_model=cfg.infile_content
             )
-            logger.info(f"ERROR PROMPT: {prompt}")
+            logger.info(f"ERROR PROMPT:\n{prompt}")
             print(f"<{i}> Got {len(errors)} errors in the OpenAPI JSON; prompting for new answer")
             answer = call_llm(chat_model, prompt)
             continue
 
+        # -------------------------------------------------------------
         # Ask the user if the OpenAPI JSON should be further improved.
+        # -------------------------------------------------------------
         if cfg.user_interactive:
             print("Give instructions for improving the OpenAPI JSON ('quit' to exit):")
             user_reply = input(f"{i}>: ")
@@ -390,13 +451,20 @@ def main(cfg: Config) -> None:
                     ("system", system_improve_template),
                     ("human" , improve_template)
                 ])
-                current_json_output = json_output if json_output else prev_json_output
+                if json_object:
+                    json_output = mk_json_output(json_object, indent=None)
+                elif prev_json_object:
+                    json_output = mk_json_output(prev_json_object, indent=None)
+                else:
+                    print("<ERROR> No JSON object to improve! Exiting.")
+                    break
                 prompt = improve_prompt.format_messages(
                     general_system_rules=general_system_rules,
                     user_reply=user_reply,
-                    openapi_json=current_json_output
+                    openapi_json=json_output,
+                    yang_model=cfg.infile_content
                 )
-                logger.info(f"IMPROVE PROMPT: {prompt}")
+                logger.info(f"IMPROVE PROMPT:\n{prompt}")
                 answer = call_llm(chat_model, prompt)
                 continue
 
