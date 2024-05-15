@@ -193,7 +193,9 @@ general_system_rules = """
 
 - To conform to RESTCONF RFC 8040, paths with a key must look like this: '/foo:bar={key1}'.
 
-- When creating a precence container, an empty object should be sent as the payload.
+- When creating a presence container, an empty object should be sent as the payload.
+
+- Vhen creating or modifying a YANG data resource a return code '204 No Content' will be returned at success.
 
 - The content media type must be 'application/yang-data+json'.
 
