@@ -53,6 +53,7 @@ class Config:
         self.server_url = 'http://localhost:8080/restconf/data'
         self.infile = None
         self.outfile = None
+        self.jsonfile = None
         self.infile_content = None
         self.user_interactive = False
 
@@ -61,11 +62,11 @@ def parse_args() -> str:
 
     parser.add_argument('-i', '--infile', type=str, help='Input file')
     parser.add_argument('-o', '--outfile', type=str, help='Output file')
-    parser.add_argument('-m', '--model', type=str, default='gpt-4o', help='Set OpenAPI to use (default: gpt-4)')
+    parser.add_argument('-m', '--model', type=str, default='gpt-4o', help='Set OpenAPI to use (default: gpt-4o)')
     parser.add_argument('-t', '--time', action='store_true' , help='Output some runtime info')
     parser.add_argument('-u', '--user-interactive', action='store_true' , help='You will be prompted for improvment instructions.')
     parser.add_argument('--validate', action='store_true' , help='Validate OpenAPI <infile>')
-    parser.add_argument('--improve', action='store_true' , help='Improve OpenAPI <infile>')
+    parser.add_argument('--improve', type=str , help='Improve OpenAPI <jsonfile>')
     parser.add_argument('--temperature', type=float, default=0.7, help='Set the temperature for creativity (default: 0.7)')
     parser.add_argument('-s', '--server-url', type=str, default='http://localhost:8080/restconf/data', help='Set the server URL in the OpenAPI')
     parser.add_argument('-v', '--verbose', action='store_true' , help='Output some debug info')
@@ -84,7 +85,10 @@ def parse_args() -> str:
     config.infile = args.infile
     config.outfile = args.outfile
     config.user_interactive = args.user_interactive
-    config.start_by_improving = args.improve
+    if args.improve:
+        # We will use an existing OpenAPI JSON file as a starting point to improve upon.
+        config.start_by_improving = True
+        config.jsonfile = args.improve
 
     return config
 
@@ -174,15 +178,46 @@ def extract_json_object(text, decoder=json.JSONDecoder()) -> Iterable[Dict[str, 
 
 general_system_rules = """
 - Each and every YANG element must be transformed to the corresponding OpenAPI JSON objects.
+
 - The answer must only consist of OpenAPI JSON version 3.1.
+
 - Be elaborate in your answer and provide as much detail as possible including all the necessary objects.
+
 - All YANG elements must have operations for GET, POST, PUT, DELETE, and PATCH, except 'rpc' and 'action' that only can be operated on with POST.
+
 - You must produce both Path, Path Item, and Operation Objects where an initial Path Item is prefixed with the Yang module name followed by a colon; example: 'foo:bar'.
+
 - For Yang list and leaf-list elements, you must produce a Parameter Path Object for corresponding keys, unless the operation is a POST.
+
 - For each path operation, you must produce a Request Body Object with an example, unless the operation is a GET.
+
 - To conform to RESTCONF RFC 8040, paths with a key must look like this: '/foo:bar={key1}'.
+
+- When creating a precence container, an empty object should be sent as the payload.
+
 - The content media type must be 'application/yang-data+json'.
+
 - All GET operations have an optional query Parameter Object with the name 'depth' of type 'uint16'.
+"""
+
+restconf_rules = """
+- The '/restconf}/data' subtree represents the datastore resource, which is a collection of configuration data and state data nodes.
+
+- A data resource represents a YANG data node that is a descendant node of a datastore resource.
+  Containers, leafs, leaf-list entries, list entries, anydata nodes, and anyxml nodes are data resources.
+
+- The GET method is used to retrieve data for a resource. It is supported for all resource types, except operation resources.
+
+- The POST method is used to create a new resource. It is supported for all resource types, except operation resources.
+  The target resource for the POST method for resource creation is the parent of the new resource.
+  The message-body is expected to contain the content of a child resource to create within the parent (targetresource).
+
+- The PUT method is used to create or replace the target data resource.
+  The target resource for the PUT method for resource creation is the new resource.
+
+- The PATCH method can be used to create or update, but not delete, a child resource within the target resource.
+
+- The DELETE method is used to delete the target resource.
 """
 
 
@@ -333,6 +368,7 @@ def xprint_path_elements(json_object):
             print_path_elements(item)
 
 
+
 def main(cfg: Config) -> None:
 
     # Validate only?
@@ -349,12 +385,33 @@ def main(cfg: Config) -> None:
     )
     chat_model.temperature = cfg.default_temperature
 
+    # Counter to be displayed in the prompt, indicating the number of iterations.
+    i = 0
+
+    # If the LLM do not return a JSON object we need to keep
+    # track of the previous good JSON object to be able to
+    # potentially have it returned to be improved upon user request.
+    json_output = None
+    prev_json_object = None
+    
     if cfg.start_by_improving:
-        # Create the initial prompt containing the OpenAPI JSON input.
-        # FIXME: This is not implemented yet.
-        spec_dict, _base_uri = read_from_filename(cfg.infile)
-        print_path_elements(spec_dict)
-        exit(0)
+        print("Give instructions for improving the OpenAPI JSON ('quit' to exit):")
+        user_reply = input(f"{i}>: ")
+        if user_reply.lower() == "quit":
+            exit(0)
+        else:
+            improve_prompt = ChatPromptTemplate.from_messages([
+                ("system", system_improve_template),
+                ("human" , improve_template)
+            ])
+            with open(cfg.jsonfile, 'r') as f:
+                json_input = f.read()
+            prompt = improve_prompt.format_messages(
+                general_system_rules=general_system_rules,
+                user_reply=user_reply,
+                openapi_json=json_input,
+                yang_model=cfg.infile_content
+            )
     else:
         # Create the initial prompt containing the YANG input.
         init_prompt = ChatPromptTemplate.from_messages([
@@ -367,20 +424,11 @@ def main(cfg: Config) -> None:
             yang_model=cfg.infile_content
         )
 
-    logger.info(f"INIT PROMPT: {prompt}")
+    logger.info(f"START PROMPT: {prompt}")
 
     # Call the model with the initial prompt
     answer = call_llm(chat_model, prompt)
-
-    # If the LLM do not return a JSON object we need to keep
-    # track of the previous good JSON object to be able to
-    # potentially have it returned to be improved upon user request.
-    json_output = None
-    prev_json_object = None
-
-    # Counter to be displayed in the prompt, indicating the number of iterations.
-    i = 0
-
+    
     # -------------------------------------------------------------
     # Loop until the user is satisfied with the answer.
     # -------------------------------------------------------------

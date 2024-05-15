@@ -63,6 +63,17 @@ Note also how we specify a server where we run a RESTCONF server.
 python3 src/yang2openapi.py  --verbose -u -s 'http://192.168.1.231:9080/restconf/data' --infile ./data/example.yang --outfile /tmp/shared_docker_dir/swagger.json
 ```
 
+You can stop your work and come back later and continue to improve your OpenAPI JSON.
+Like in the example below:
+
+```shell
+ python3 src/yang2openapi.py  --verbose -u -s 'http://192.168.1.231:9080' --improve /tmp/shared_docker_dir/swagger.json --infile ./data/example.yang --outfile /tmp/shared_docker_dir/swagger.json            
+Give instructions for improving the OpenAPI JSON ('quit' to exit):
+0>: when creating or modifying a YANG data resource a return code '204 No Content' will be returned at success.
+Give instructions for improving the OpenAPI JSON ('quit' to exit): 
+1>: ....
+```
+
 ## Demo
 
 Here is a [demo](https://youtu.be/rcrAmRjqsPE?si=MPIMNwcx4a7ieIB7) that show how we build
