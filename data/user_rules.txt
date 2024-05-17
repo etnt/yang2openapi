@@ -1,0 +1,6 @@
+
+Add a Server Object with the URL: 'http://192.168.1.231:9008'
+
+Add a Security Scheme Object with 'http' and the scheme 'basic'.
+
+the paths must begin with: /restconf/data

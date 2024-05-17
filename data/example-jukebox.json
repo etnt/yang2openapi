@@ -1,0 +1,589 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Example Jukebox Data Model",
+        "version": "2016-08-15",
+        "description": "Example Jukebox Data Model Module",
+        "contact": {
+            "name": "support",
+            "email": "support@example.com"
+        }
+    },
+    "servers": [
+        {
+            "url": "http://192.168.1.231:9008"
+        }
+    ],
+    "components": {
+        "securitySchemes": {
+            "basicAuth": {
+                "type": "http",
+                "scheme": "basic"
+            }
+        },
+        "schemas": {
+            "system": {
+                "type": "object",
+                "properties": {
+                    "enable-jukebox-streaming": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "jukebox": {
+                "type": "object",
+                "properties": {
+                    "pbox": {
+                        "type": "object",
+                        "properties": {
+                            "pbox2": {
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "library": {
+                        "type": "object",
+                        "properties": {
+                            "artist": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/artist"
+                                }
+                            },
+                            "artist-count": {
+                                "type": "integer",
+                                "format": "uint32",
+                                "readOnly": true
+                            },
+                            "album-count": {
+                                "type": "integer",
+                                "format": "uint32",
+                                "readOnly": true
+                            },
+                            "song-count": {
+                                "type": "integer",
+                                "format": "uint32",
+                                "readOnly": true
+                            }
+                        }
+                    },
+                    "playlist": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/playlist"
+                        }
+                    },
+                    "player": {
+                        "type": "object",
+                        "properties": {
+                            "gap": {
+                                "type": "number",
+                                "format": "decimal64",
+                                "minimum": 0.0,
+                                "maximum": 2.0
+                            }
+                        }
+                    }
+                }
+            },
+            "artist": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "album": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/album"
+                        }
+                    }
+                }
+            },
+            "album": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "genre": {
+                        "type": "string"
+                    },
+                    "year": {
+                        "type": "integer",
+                        "format": "uint16"
+                    },
+                    "admin": {
+                        "type": "object",
+                        "properties": {
+                            "label": {
+                                "type": "string"
+                            },
+                            "catalogue-number": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "song": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/song"
+                        }
+                    }
+                }
+            },
+            "song": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "location": {
+                        "type": "string"
+                    },
+                    "format": {
+                        "type": "string"
+                    },
+                    "length": {
+                        "type": "integer",
+                        "format": "uint32"
+                    }
+                }
+            },
+            "playlist": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "song": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/playlist_song"
+                        }
+                    }
+                }
+            },
+            "playlist_song": {
+                "type": "object",
+                "properties": {
+                    "index": {
+                        "type": "integer",
+                        "format": "uint32"
+                    },
+                    "id": {
+                        "type": "string"
+                    }
+                }
+            },
+            "play": {
+                "type": "object",
+                "properties": {
+                    "playlist": {
+                        "type": "string"
+                    },
+                    "song-number": {
+                        "type": "integer",
+                        "format": "uint32"
+                    }
+                }
+            }
+        }
+    },
+    "paths": {
+        "/restconf/data/example-jukebox:system": {
+            "get": {
+                "description": "Retrieve the system configuration",
+                "parameters": [
+                    {
+                        "name": "depth",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "format": "uint16"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/yang-data+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/system"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "description": "Update the system configuration",
+                "requestBody": {
+                    "content": {
+                        "application/yang-data+json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/system"
+                            },
+                            "example": {
+                                "system": {
+                                    "enable-jukebox-streaming": true
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "description": "Modify the system configuration",
+                "requestBody": {
+                    "content": {
+                        "application/yang-data+json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/system"
+                            },
+                            "example": {
+                                "system": {
+                                    "enable-jukebox-streaming": true
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "description": "Delete the system configuration",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            }
+        },
+        "/restconf/data/example-jukebox:jukebox": {
+            "get": {
+                "description": "Retrieve the jukebox configuration",
+                "parameters": [
+                    {
+                        "name": "depth",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "format": "uint16"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/yang-data+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/jukebox"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "description": "Create a new jukebox configuration",
+                "requestBody": {
+                    "content": {
+                        "application/yang-data+json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/jukebox"
+                            },
+                            "example": {}
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "description": "Update the jukebox configuration",
+                "requestBody": {
+                    "content": {
+                        "application/yang-data+json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/jukebox"
+                            },
+                            "example": {}
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "description": "Modify the jukebox configuration",
+                "requestBody": {
+                    "content": {
+                        "application/yang-data+json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/jukebox"
+                            },
+                            "example": {}
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "description": "Delete the jukebox configuration",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            }
+        },
+        "/restconf/data/example-jukebox:jukebox/library/artist/{name}": {
+            "parameters": [
+                {
+                    "name": "name",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            ],
+            "get": {
+                "description": "Retrieve an artist",
+                "parameters": [
+                    {
+                        "name": "depth",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "format": "uint16"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/yang-data+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/artist"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "description": "Update an artist",
+                "requestBody": {
+                    "content": {
+                        "application/yang-data+json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/artist"
+                            },
+                            "example": {
+                                "artist": {
+                                    "name": "John Doe",
+                                    "album": [
+                                        {
+                                            "name": "Greatest Hits",
+                                            "genre": "rock",
+                                            "year": 1990,
+                                            "admin": {
+                                                "label": "Awesome Music",
+                                                "catalogue-number": "12345"
+                                            },
+                                            "song": [
+                                                {
+                                                    "name": "Hit Song",
+                                                    "location": "/music/hit_song.mp3",
+                                                    "format": "mp3",
+                                                    "length": 210
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "description": "Modify an artist",
+                "requestBody": {
+                    "content": {
+                        "application/yang-data+json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/artist"
+                            },
+                            "example": {
+                                "artist": {
+                                    "name": "John Doe",
+                                    "album": [
+                                        {
+                                            "name": "Greatest Hits",
+                                            "genre": "rock",
+                                            "year": 1990,
+                                            "admin": {
+                                                "label": "Awesome Music",
+                                                "catalogue-number": "12345"
+                                            },
+                                            "song": [
+                                                {
+                                                    "name": "Hit Song",
+                                                    "location": "/music/hit_song.mp3",
+                                                    "format": "mp3",
+                                                    "length": 210
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "description": "Delete an artist",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            }
+        },
+        "/restconf/data/example-jukebox:play": {
+            "post": {
+                "description": "Control function for the jukebox player",
+                "requestBody": {
+                    "content": {
+                        "application/yang-data+json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/play"
+                            },
+                            "example": {
+                                "playlist": "My Playlist",
+                                "song-number": 1
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                },
+                "security": [
+                    {
+                        "basicAuth": []
+                    }
+                ]
+            }
+        }
+    }
+}

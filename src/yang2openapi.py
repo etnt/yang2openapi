@@ -43,7 +43,7 @@ logger.addHandler(handler)
 
 
 # Create a class to hold the configuration and other stateful data
-class Config:
+class State:
     def __init__(self):
         self.start_by_improving = False
         self.validate_only = False
@@ -54,14 +54,19 @@ class Config:
         self.infile = None
         self.outfile = None
         self.jsonfile = None
+        self.user_rules_file = None
         self.infile_content = None
         self.user_interactive = False
 
+    def __str__(self):
+        return f"State: {self.__dict__}"
+
 def parse_args() -> str:
-    parser = argparse.ArgumentParser(description='Ask an AI model for answer to you question')
+    parser = argparse.ArgumentParser(description='Transform YANG to OpenAPI JSON.')
 
     parser.add_argument('-i', '--infile', type=str, help='Input file')
-    parser.add_argument('-o', '--outfile', type=str, help='Output file')
+    parser.add_argument('-o', '--outfile', type=str, default="swagger.json", help='Output file (default: swagger.json)')
+    parser.add_argument('-r', '--user-rules-file', type=str, default="user_rules.txt", help='Use rules file (default: user_rules.txt)')
     parser.add_argument('-m', '--model', type=str, default='gpt-4o', help='Set OpenAPI to use (default: gpt-4o)')
     parser.add_argument('-t', '--time', action='store_true' , help='Output some runtime info')
     parser.add_argument('-u', '--user-interactive', action='store_true' , help='You will be prompted for improvment instructions.')
@@ -76,21 +81,22 @@ def parse_args() -> str:
     if args.time:
         os.environ['YANG2OPENAPI_RUNTIME'] = 'True'
 
-    config = Config()
-    config.validate_only = args.validate
-    config.model = args.model
-    config.verbose = args.verbose
-    config.default_temperature = args.temperature
-    config.server_url = args.server_url
-    config.infile = args.infile
-    config.outfile = args.outfile
-    config.user_interactive = args.user_interactive
+    state = State()
+    state.validate_only = args.validate
+    state.model = args.model
+    state.verbose = args.verbose
+    state.default_temperature = args.temperature
+    state.server_url = args.server_url
+    state.infile = args.infile
+    state.outfile = args.outfile
+    state.user_rules_file = args.user_rules_file
+    state.user_interactive = args.user_interactive
     if args.improve:
         # We will use an existing OpenAPI JSON file as a starting point to improve upon.
-        config.start_by_improving = True
-        config.jsonfile = args.improve
+        state.start_by_improving = True
+        state.jsonfile = args.improve
 
-    return config
+    return state
 
 
 def log_execution_time(func):
@@ -177,11 +183,11 @@ def extract_json_object(text, decoder=json.JSONDecoder()) -> Iterable[Dict[str, 
 
 
 general_system_rules = """
-- Each and every YANG element must be transformed to the corresponding OpenAPI JSON objects.
+- Each and every YANG element must be transformed to the corresponding OpenAPI JSON objects as specified in the RESTCONF RFC 8040.
 
 - The answer must only consist of OpenAPI JSON version 3.1.
 
-- Be elaborate in your answer and provide as much detail as possible including all the necessary objects.
+{restconf_rules}
 
 - All YANG elements must have operations for GET, POST, PUT, DELETE, and PATCH, except 'rpc' and 'action' that only can be operated on with POST.
 
@@ -191,7 +197,9 @@ general_system_rules = """
 
 - For each path operation, you must produce a Request Body Object with an example, unless the operation is a GET.
 
-- To conform to RESTCONF RFC 8040, paths with a key must look like this: '/foo:bar={key1}'.
+- Add a Security Scheme Object with 'http' and the scheme 'basic'.
+
+- Add a Server Object with the URL: '{server_url}'.
 
 - When creating a presence container, an empty object should be sent as the payload.
 
@@ -203,10 +211,13 @@ general_system_rules = """
 """
 
 restconf_rules = """
-- The '/restconf}/data' subtree represents the datastore resource, which is a collection of configuration data and state data nodes.
+- The '/restconf/data' subtree represents the datastore resource, which is a collection of configuration data and state data nodes.
 
 - A data resource represents a YANG data node that is a descendant node of a datastore resource.
   Containers, leafs, leaf-list entries, list entries, anydata nodes, and anyxml nodes are data resources.
+
+- The top-level data node MUST begin with a module name followed by a colon, and the module name MUST be followed by a data node name.
+  Example: '/restconf/data/ietf-interfaces:interfaces'.
 
 - The GET method is used to retrieve data for a resource. It is supported for all resource types, except operation resources.
 
@@ -229,8 +240,8 @@ You excel in transforming Yang models to the corresponding OpenAPI JSON that con
 You must follow the following rules:
 
 {general_system_rules}
-- Add a Security Scheme Object with 'http' and the scheme 'basic'.
-- Add a Server Object with the URL: '{server_url}'.
+
+{user_rules}
 """
 
 system_error_template = """
@@ -241,6 +252,8 @@ Only JSON is accepted.
 Remember to follow the following rules:
 
 {general_system_rules}
+
+{user_rules}
 """
 
 
@@ -270,6 +283,8 @@ Only JSON is accepted.
 Remember to follow the following rules:
 
 {general_system_rules}
+
+{user_rules}
 """
 
 improve_template = """
@@ -311,10 +326,10 @@ def mk_json_output(json_object, indent=4):
     return json_output
 
 
-def read_infile(cfg: Config) -> Config:
-    with open(cfg.infile, 'r') as f:
-        cfg.infile_content = f.read()
-    return cfg
+def read_infile(state: State) -> State:
+    with open(state.infile, 'r') as f:
+        state.infile_content = f.read()
+    return state
 
 
 @log_execution_time
@@ -323,9 +338,9 @@ def validate_json(file):
     return OpenAPIV31SpecValidator(spec_dict).iter_errors()
 
 
-def validate_json_file_and_exit(cfg: Config) -> None:
+def validate_json_file_and_exit(state: State) -> None:
     try:
-        errors_iterator = validate_json(cfg.infile)
+        errors_iterator = validate_json(state.infile)
         found_errors = False
         for error in errors_iterator:
             found_errors = True
@@ -371,21 +386,21 @@ def xprint_path_elements(json_object):
 
 
 
-def main(cfg: Config) -> None:
+def main(state: State) -> None:
 
     # Validate only?
-    if cfg.validate_only:
-        validate_json_file_and_exit(cfg)
+    if state.validate_only:
+        validate_json_file_and_exit(state)
 
     # Read in the Yang file
-    cfg = read_infile(cfg)
+    state = read_infile(state)
 
     # Create the chat model
     chat_model = ChatOpenAI(
         openai_api_key=api_key,
-        model_name=cfg.model
+        model_name=state.model
     )
-    chat_model.temperature = cfg.default_temperature
+    chat_model.temperature = state.default_temperature
 
     # Counter to be displayed in the prompt, indicating the number of iterations.
     i = 0
@@ -395,8 +410,15 @@ def main(cfg: Config) -> None:
     # potentially have it returned to be improved upon user request.
     json_output = None
     prev_json_object = None
-    
-    if cfg.start_by_improving:
+
+    if state.user_rules_file:
+        try:
+            with open(state.user_rules_file, 'r') as f:
+                user_rules = f.read()
+        except FileNotFoundError:
+            user_rules = ""
+
+    if state.start_by_improving:
         print("Give instructions for improving the OpenAPI JSON ('quit' to exit):")
         user_reply = input(f"{i}>: ")
         if user_reply.lower() == "quit":
@@ -406,13 +428,15 @@ def main(cfg: Config) -> None:
                 ("system", system_improve_template),
                 ("human" , improve_template)
             ])
-            with open(cfg.jsonfile, 'r') as f:
+            with open(state.jsonfile, 'r') as f:
                 json_input = f.read()
             prompt = improve_prompt.format_messages(
                 general_system_rules=general_system_rules,
+                restconf_rules=restconf_rules,
+                user_rules=user_rules,
                 user_reply=user_reply,
                 openapi_json=json_input,
-                yang_model=cfg.infile_content
+                yang_model=state.infile_content
             )
     else:
         # Create the initial prompt containing the YANG input.
@@ -422,8 +446,10 @@ def main(cfg: Config) -> None:
         ])
         prompt = init_prompt.format_messages(
             general_system_rules=general_system_rules,
-            server_url=cfg.server_url,
-            yang_model=cfg.infile_content
+            restconf_rules=restconf_rules,
+            user_rules=user_rules,
+            server_url=state.server_url,
+            yang_model=state.infile_content
         )
 
     logger.info(f"START PROMPT: {prompt}")
@@ -449,9 +475,9 @@ def main(cfg: Config) -> None:
         # If we got a JSON object, write it to the output file and validate it.
         # -------------------------------------------------------------
         errors_found = False
-        if cfg.outfile and json_object:
+        if state.outfile and json_object:
             json_output = mk_json_output(json_object)
-            outfile = cfg.outfile
+            outfile = state.outfile
             with open(outfile, 'w') as f:
                 f.write(json_output)
             # Validate the OpenAPI spec we got from the AI model.
@@ -479,9 +505,11 @@ def main(cfg: Config) -> None:
             json_output = mk_json_output(json_object, indent=None)
             prompt = error_prompt.format_messages(
                 general_system_rules=general_system_rules,
+                restconf_rules=restconf_rules,
+                user_rules=user_rules,
                 errors=errors, 
                 openapi_json=json_output,
-                yang_model=cfg.infile_content
+                yang_model=state.infile_content
             )
             logger.info(f"ERROR PROMPT:\n{prompt}")
             print(f"<{i}> Got {len(errors)} errors in the OpenAPI JSON; prompting for new answer")
@@ -491,7 +519,7 @@ def main(cfg: Config) -> None:
         # -------------------------------------------------------------
         # Ask the user if the OpenAPI JSON should be further improved.
         # -------------------------------------------------------------
-        if cfg.user_interactive:
+        if state.user_interactive:
             print("Give instructions for improving the OpenAPI JSON ('quit' to exit):")
             user_reply = input(f"{i}>: ")
             if user_reply.lower() == "quit":
@@ -510,10 +538,15 @@ def main(cfg: Config) -> None:
                     break
                 prompt = improve_prompt.format_messages(
                     general_system_rules=general_system_rules,
+                    restconf_rules=restconf_rules,
+                    user_rules=user_rules,
                     user_reply=user_reply,
                     openapi_json=json_output,
-                    yang_model=cfg.infile_content
+                    yang_model=state.infile_content
                 )
+                if state.user_rules_file:
+                    with open(state.user_rules_file, 'a') as f:
+                        f.write('\n' + user_reply + '\n')
                 logger.info(f"IMPROVE PROMPT:\n{prompt}")
                 answer = call_llm(chat_model, prompt)
                 continue
@@ -522,7 +555,10 @@ def main(cfg: Config) -> None:
 
 if __name__ == "__main__":
     # Parse the command line arguments
-    cfg = parse_args()
+    state = parse_args()
+
+    if state.verbose:
+        print(state)
 
     # Call the main function with the parsed arguments
-    main(cfg)
+    main(state)
